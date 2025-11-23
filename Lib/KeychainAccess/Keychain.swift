@@ -583,15 +583,27 @@ public final class Keychain {
         return Keychain(options)
     }
     #endif
+    
+    public func encryptAttributeAccount(_ encryptAttributeAccount: Bool) -> Keychain {
+        var options = self.options
+        options.encryptAttributeAccount = encryptAttributeAccount
+        return Keychain(options)
+    }
+    
+    public func useAttributeGeneric(_ useAttributeGeneric: Bool) -> Keychain {
+        var options = self.options
+        options.useAttributeGeneric = useAttributeGeneric
+        return Keychain(options)
+    }
 
     // MARK:
 
-    public func get(_ key: String, ignoringAttributeSynchronizable: Bool = true, encryptAttributeAccount: Bool = false) throws -> String? {
-        return try getString(key, ignoringAttributeSynchronizable: ignoringAttributeSynchronizable, encryptAttributeAccount: encryptAttributeAccount)
+    public func get(_ key: String, ignoringAttributeSynchronizable: Bool = true) throws -> String? {
+        return try getString(key, ignoringAttributeSynchronizable: ignoringAttributeSynchronizable)
     }
 
-    public func getString(_ key: String, ignoringAttributeSynchronizable: Bool = true, encryptAttributeAccount: Bool = false) throws -> String? {
-        guard let data = try getData(key, ignoringAttributeSynchronizable: ignoringAttributeSynchronizable, encryptAttributeAccount: encryptAttributeAccount) else  {
+    public func getString(_ key: String, ignoringAttributeSynchronizable: Bool = true) throws -> String? {
+        guard let data = try getData(key, ignoringAttributeSynchronizable: ignoringAttributeSynchronizable) else  {
             return nil
         }
         guard let string = String(data: data, encoding: .utf8) else {
@@ -601,13 +613,16 @@ public final class Keychain {
         return string
     }
 
-    public func getData(_ key: String, ignoringAttributeSynchronizable: Bool = true, encryptAttributeAccount: Bool = false) throws -> Data? {
+    public func getData(_ key: String, ignoringAttributeSynchronizable: Bool = true) throws -> Data? {
         var query = options.query(ignoringAttributeSynchronizable: ignoringAttributeSynchronizable)
 
         query[MatchLimit] = MatchLimitOne
         query[ReturnData] = kCFBooleanTrue
 
-        query[AttributeAccount] = encryptAttributeAccount ? key.data(using: .utf8) : key
+        query[AttributeAccount] = options.encryptAttributeAccount ? key.data(using: .utf8) : key
+        if options.useAttributeGeneric {
+            query[AttributeGeneric] = key.data(using: .utf8)
+        }
 
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
@@ -625,7 +640,7 @@ public final class Keychain {
         }
     }
 
-    public func get<T>(_ key: String, ignoringAttributeSynchronizable: Bool = true, encryptAttributeAccount: Bool = false, handler: (Attributes?) -> T) throws -> T {
+    public func get<T>(_ key: String, ignoringAttributeSynchronizable: Bool = true, handler: (Attributes?) -> T) throws -> T {
         var query = options.query(ignoringAttributeSynchronizable: ignoringAttributeSynchronizable)
 
         query[MatchLimit] = MatchLimitOne
@@ -635,7 +650,10 @@ public final class Keychain {
         query[ReturnRef] = kCFBooleanTrue
         query[ReturnPersistentRef] = kCFBooleanTrue
 
-        query[AttributeAccount] = encryptAttributeAccount ? key.data(using: .utf8) : key
+        query[AttributeAccount] = options.encryptAttributeAccount ? key.data(using: .utf8) : key
+        if options.useAttributeGeneric {
+            query[AttributeGeneric] = key.data(using: .utf8)
+        }
 
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
@@ -655,17 +673,20 @@ public final class Keychain {
 
     // MARK:
 
-    public func set(_ value: String, key: String, ignoringAttributeSynchronizable: Bool = true, encryptAttributeAccount: Bool = false) throws {
+    public func set(_ value: String, key: String, ignoringAttributeSynchronizable: Bool = true) throws {
         guard let data = value.data(using: .utf8, allowLossyConversion: false) else {
             print("failed to convert string to data")
             throw Status.conversionError
         }
-        try set(data, key: key, ignoringAttributeSynchronizable: ignoringAttributeSynchronizable, encryptAttributeAccount: encryptAttributeAccount)
+        try set(data, key: key, ignoringAttributeSynchronizable: ignoringAttributeSynchronizable)
     }
 
-    public func set(_ value: Data, key: String, ignoringAttributeSynchronizable: Bool = true, encryptAttributeAccount: Bool = false) throws {
+    public func set(_ value: Data, key: String, ignoringAttributeSynchronizable: Bool = true) throws {
         var query = options.query(ignoringAttributeSynchronizable: ignoringAttributeSynchronizable)
-        query[AttributeAccount] = encryptAttributeAccount ? key.data(using: .utf8) : key
+        query[AttributeAccount] = options.encryptAttributeAccount ? key.data(using: .utf8) : key
+        if options.useAttributeGeneric {
+            query[AttributeGeneric] = key.data(using: .utf8)
+        }
         #if os(iOS)
         if #available(iOS 9.0, *) {
             if let authenticationUI = options.authenticationUI {
@@ -695,7 +716,10 @@ public final class Keychain {
         switch status {
         case errSecSuccess, errSecInteractionNotAllowed:
             var query = options.query()
-            query[AttributeAccount] = encryptAttributeAccount ? key.data(using: .utf8) : key
+            query[AttributeAccount] = options.encryptAttributeAccount ? key.data(using: .utf8) : key
+            if options.useAttributeGeneric {
+                query[AttributeGeneric] = key.data(using: .utf8)
+            }
 
             var (attributes, error) = options.attributes(key: nil, value: value)
             if let error = error {
@@ -805,10 +829,13 @@ public final class Keychain {
 
     // MARK:
 
-    public func remove(_ key: String, ignoringAttributeSynchronizable: Bool = true, encryptAttributeAccount: Bool = false) throws {
+    public func remove(_ key: String, ignoringAttributeSynchronizable: Bool = true) throws {
         var query = options.query(ignoringAttributeSynchronizable: ignoringAttributeSynchronizable)
-        query[AttributeAccount] = encryptAttributeAccount ? key.data(using: .utf8) : key
-
+        query[AttributeAccount] = options.encryptAttributeAccount ? key.data(using: .utf8) : key
+        if options.useAttributeGeneric {
+            query[AttributeGeneric] = key.data(using: .utf8)
+        }
+        
         let status = SecItemDelete(query as CFDictionary)
         if status != errSecSuccess && status != errSecItemNotFound {
             throw securityError(status: status)
@@ -829,10 +856,13 @@ public final class Keychain {
 
     // MARK:
 
-    public func contains(_ key: String, withoutAuthenticationUI: Bool = false, encryptAttributeAccount: Bool = false) throws -> Bool {
+    public func contains(_ key: String, withoutAuthenticationUI: Bool = false) throws -> Bool {
         var query = options.query()
-        query[AttributeAccount] = encryptAttributeAccount ? key.data(using: .utf8) : key
-
+        query[AttributeAccount] = options.encryptAttributeAccount ? key.data(using: .utf8) : key
+        if options.useAttributeGeneric {
+            query[AttributeGeneric] = key.data(using: .utf8)
+        }
+        
         if withoutAuthenticationUI {
             #if os(iOS) || os(watchOS) || os(tvOS)
             if #available(iOS 9.0, *) {
@@ -1157,6 +1187,11 @@ public final class Keychain {
             } else if let data = attributes[AttributeAccount] as? Data {
                 item["key"] = data
             }
+            
+            if let data = attributes[AttributeGeneric] as? Data {
+                item["generic"] = data
+            }
+            
             if let data = attributes[ValueData] as? Data {
                 if let text = String(data: data, encoding: .utf8) {
                     item["value"] = text
@@ -1209,6 +1244,8 @@ struct Options {
 
     var accessibility: Accessibility = .afterFirstUnlock
     var authenticationPolicy: AuthenticationPolicy?
+    var useAttributeGeneric: Bool = false
+    var encryptAttributeAccount: Bool = false
 
     var synchronizable: Bool = false
 
@@ -1361,7 +1398,7 @@ extension Options {
         return query
     }
 
-    func attributes(key: String?, value: Data, encryptAttributeAccount: Bool = false) -> ([String: Any], Error?) {
+    func attributes(key: String?, value: Data) -> ([String: Any], Error?) {
         var attributes: [String: Any]
 
         if let key {
@@ -1369,6 +1406,10 @@ extension Options {
             attributes[AttributeAccount] = encryptAttributeAccount ? key.data(using: .utf8) : key
         } else {
             attributes = [String: Any]()
+        }
+        
+        if useAttributeGeneric {
+            attributes[AttributeGeneric] = key?.data(using: .utf8)
         }
 
         attributes[ValueData] = value
